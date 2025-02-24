@@ -42,9 +42,28 @@ A modern tool for managing Unity project caches and credentials. Helps improve b
 
 ## Installation
 
-1. Download the latest release from the [Releases](https://github.com/serovectra/Unity-Cache-Cleaner-v1.0.0/releases) page
-2. Extract the zip file to your preferred location
+Choose your preferred installation method:
+
+### Option 1: Windows Installer (Recommended)
+1. Download `UnityCacheCleaner-1.3.0-beta.msi` from the latest release
+2. Run the installer
+3. Launch from Start Menu
+
+### Option 2: Portable ZIP
+1. Download `UnityCacheCleaner-1.3.0-beta-portable.zip`
+2. Extract to any location
 3. Run `UnityCacheCleaner.exe`
+
+### Option 3: Chocolatey
+```powershell
+choco install unity-cache-cleaner --version 1.3.0-beta
+```
+
+### Prerequisites
+- Windows 10/11
+- .NET 6.0 Runtime (automatically installed by Windows Installer and Chocolatey)
+- Unity 2019.4 or later (for cache cleaning)
+- Unity Hub 3.0 or later (for sign-out feature)
 
 ## Usage
 

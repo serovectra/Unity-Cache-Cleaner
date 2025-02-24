@@ -76,3 +76,36 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# .NET build outputs
+bin/
+obj/
+dist/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Electron Builder
+releases/
+.electron-builder/
+
+# IDE
+.vscode/
+*.suo
+
+# Build artifacts
+*.exe
+*.dll
+*.pdb
+*.AppImage
+*.deb
+*.rpm
+*.snap
+*.tar.gz
+*.zip
+
+# Temporary files
+*~
+*.swp
+.DS_Store

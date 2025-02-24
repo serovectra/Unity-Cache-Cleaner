@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <Authors>Unity Cache Cleaner Contributors</Authors>
+    <Description>A Windows desktop application to help Unity developers manage and clean their project caches efficiently.</Description>
+    <Copyright>Copyright 2025</Copyright>
+    <PackageProjectUrl>https://github.com/serovectra/Unity-Cache-Cleaner-v1.0.0</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/serovectra/Unity-Cache-Cleaner-v1.0.0</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\LICENSE">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+</Project>

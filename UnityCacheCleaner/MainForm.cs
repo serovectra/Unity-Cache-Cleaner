@@ -1448,21 +1448,15 @@ namespace UnityCacheCleaner
             {
                 if (logTextBox.InvokeRequired)
                 {
-                    this.Invoke(new Action(() => LogMessage(message)));
+                    logTextBox.Invoke(new Action(() => LogMessage(message)));
                     return;
                 }
 
                 string timestamp = DateTime.Now.ToString("HH:mm:ss");
-                string logEntry = $"[{timestamp}] {message}{Environment.NewLine}";
-
-                logTextBox.AppendText(logEntry);
+                logTextBox.AppendText($"[{timestamp}] {message}{Environment.NewLine}");
+                logTextBox.SelectionStart = logTextBox.Text.Length;
                 logTextBox.ScrollToCaret();
-                Debug.WriteLine(message);
-
-                if (statusLabel != null)
-                {
-                    statusLabel.Text = message;
-                }
+                Debug.WriteLine($"Log: {message}");
             }
             catch (Exception ex)
             {
@@ -1472,36 +1466,46 @@ namespace UnityCacheCleaner
 
         private void LogError(string message)
         {
-            Debug.WriteLine($"ERROR: {message}");
-
-            if (logTextBox.InvokeRequired)
+            try
             {
-                logTextBox.Invoke(new Action(() => LogError(message)));
-                return;
+                if (logTextBox.InvokeRequired)
+                {
+                    logTextBox.Invoke(new Action(() => LogError(message)));
+                    return;
+                }
+
+                string timestamp = DateTime.Now.ToString("HH:mm:ss");
+                logTextBox.AppendText($"[{timestamp}] ERROR: {message}{Environment.NewLine}");
+                logTextBox.SelectionStart = logTextBox.Text.Length;
+                logTextBox.ScrollToCaret();
+                Debug.WriteLine($"Error: {message}");
             }
-
-            string timestamp = DateTime.Now.ToString("HH:mm:ss");
-            string logEntry = $"[{timestamp}] ERROR: {message}{Environment.NewLine}";
-            logTextBox.AppendText(logEntry);
-            logTextBox.ScrollToCaret();
-
-            MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error logging error message: {ex.Message}");
+            }
         }
 
         private void LogSuccess(string message)
         {
-            Debug.WriteLine($"SUCCESS: {message}");
-
-            if (logTextBox.InvokeRequired)
+            try
             {
-                logTextBox.Invoke(new Action(() => LogSuccess(message)));
-                return;
-            }
+                if (logTextBox.InvokeRequired)
+                {
+                    logTextBox.Invoke(new Action(() => LogSuccess(message)));
+                    return;
+                }
 
-            string timestamp = DateTime.Now.ToString("HH:mm:ss");
-            string logEntry = $"[{timestamp}] SUCCESS: {message}{Environment.NewLine}";
-            logTextBox.AppendText(logEntry);
-            logTextBox.ScrollToCaret();
+                string timestamp = DateTime.Now.ToString("HH:mm:ss");
+                logTextBox.AppendText($"[{timestamp}] SUCCESS: {message}{Environment.NewLine}");
+                logTextBox.SelectionStart = logTextBox.Text.Length;
+                logTextBox.ScrollToCaret();
+                Debug.WriteLine($"Success: {message}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error logging success message: {ex.Message}");
+            }
         }
 
         private void AddToRecentProjects(string path)
@@ -1655,16 +1659,29 @@ namespace UnityCacheCleaner
 
                 LogSuccess("All operations completed successfully!");
 
+                var summary = new StringBuilder();
+                summary.AppendLine("Operation Summary:");
+                if (cleanTempCache.Checked) summary.AppendLine("✓ Temporary Cache Cleaned");
+                if (cleanLibraryCache.Checked) summary.AppendLine("✓ Library Cache Cleaned");
+                if (cleanEditorCache.Checked) summary.AppendLine("✓ Editor Cache Cleaned");
+                if (signOutUnity.Checked) summary.AppendLine("✓ Unity Sign-out Completed");
+                summary.AppendLine("\nTotal files processed: " + processedFiles);
+                LogMessage(summary.ToString());
+
                 // Show completion dialog with exit option
                 var result = MessageBox.Show(
-                    "All operations completed successfully! Would you like to exit the application?",
+                    $"All operations completed successfully!\n\n{summary}\nWould you like to exit the application?",
                     "Operations Complete",
                     MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
+                    MessageBoxIcon.Information);
 
                 if (result == DialogResult.Yes)
                 {
                     Application.Exit();
+                }
+                else
+                {
+                    LogMessage("You can safely close the application when ready.");
                 }
             }
             catch (OperationCanceledException)

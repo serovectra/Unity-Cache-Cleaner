@@ -12,6 +12,13 @@ A Windows desktop application to help Unity developers manage and clean their pr
 - Progress tracking and cancellation support
 - Detailed logging
 
+## Version 1.2.6 (2025-02-24)
+- Fixed menu positioning to prevent overlap with project dropdown
+- Updated version display consistency across the application
+- Added exit prompt after cleaning completion
+- Improved UI spacing and visual consistency
+- Added debug logging for better troubleshooting
+
 ## Requirements
 
 - Windows operating system

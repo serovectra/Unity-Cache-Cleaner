@@ -1,20 +1,46 @@
-using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Forms;
+using Microsoft.Win32;
 using System.Diagnostics;
 using System.Reflection;
-using Microsoft.Win32;
-using System.ComponentModel;
-using UnityCacheCleanerBuildManager;
+using System.Text;
 
 namespace UnityCacheCleaner
 {
+    public static class ControlExtensions
+    {
+        public static Task InvokeAsync(this Control control, Action action)
+        {
+            var tcs = new TaskCompletionSource<object>();
+            if (control.InvokeRequired)
+            {
+                control.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        action();
+                        tcs.SetResult(null!);
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.SetException(ex);
+                    }
+                }));
+            }
+            else
+            {
+                try
+                {
+                    action();
+                    tcs.SetResult(null!);
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            }
+            return tcs.Task;
+        }
+    }
+
     public partial class MainForm : Form
     {
         // UI Controls
@@ -22,62 +48,142 @@ namespace UnityCacheCleaner
         private RichTextBox logTextBox = new();
         private Label statusLabel = new();
         private Button browseButton = new();
-        private TextBox projectPathTextBox = new();
-        private Label projectLabel = new();
-        private Button refreshButton = new();
-        private ListView projectListView = new();
-        private RichTextBox debugOutputBox = new();
-        private TabControl tabControl = new();
-        private TabPage logTab = new("Log");
-        private TabPage debugTab = new("Debug Output");
-        private ProgressBar progressBar = new();
-        private Label percentLabel = new();
+        private ComboBox projectPathComboBox = new();
         private CheckBox cleanLibraryCache = new();
         private CheckBox cleanTempCache = new();
         private CheckBox cleanEditorCache = new();
-        private ComboBox projectDirComboBox = new();
-        private Button buildAndRunButton = new();
+        private CheckBox signOutUnity = new();
+        private ProgressBar progressBar = new();
+        private Label percentLabel = new();
         private Button cancelButton = new();
-        private MenuStrip mainMenu = new();
+        private MenuStrip menuStrip;
+        private ToolStripMenuItem helpMenuItem;
+        private ToolStripMenuItem versionMenuItem;
+        private ToolStripMenuItem donateMenuItem;
+        private ToolStripMenuItem paypalMenuItem;
+        private ToolStripMenuItem cashappMenuItem;
+        private ToolStripMenuItem venmoMenuItem;
+        private ToolStripMenuItem schemeMenuItem;
+        private ColorScheme currentScheme = ColorScheme.Dark;
+
+        private enum ColorScheme
+        {
+            Dark,
+            Light,
+            Blue,
+            Green,
+            Custom
+        }
+
+        private class SchemeColors
+        {
+            public Color Background { get; set; }
+            public Color Foreground { get; set; }
+            public Color Accent { get; set; }
+            public Color MenuBackground { get; set; }
+            public Color MenuForeground { get; set; }
+            public Color ButtonBackground { get; set; }
+            public Color ButtonForeground { get; set; }
+        }
+
+        private readonly Dictionary<ColorScheme, SchemeColors> colorSchemes = new()
+        {
+            [ColorScheme.Light] = new SchemeColors
+            {
+                Background = Color.FromArgb(248, 249, 250),
+                Foreground = Color.FromArgb(33, 37, 41),
+                Accent = Color.FromArgb(0, 123, 255),
+                MenuBackground = Color.FromArgb(255, 255, 255),
+                MenuForeground = Color.FromArgb(33, 37, 41),
+                ButtonBackground = Color.FromArgb(0, 123, 255),
+                ButtonForeground = Color.White
+            },
+            [ColorScheme.Dark] = new SchemeColors
+            {
+                Background = Color.FromArgb(33, 37, 41),
+                Foreground = Color.FromArgb(248, 249, 250),
+                Accent = Color.FromArgb(0, 123, 255),
+                MenuBackground = Color.FromArgb(52, 58, 64),
+                MenuForeground = Color.FromArgb(248, 249, 250),
+                ButtonBackground = Color.FromArgb(0, 123, 255),
+                ButtonForeground = Color.White
+            },
+            [ColorScheme.Blue] = new SchemeColors
+            {
+                Background = Color.FromArgb(236, 242, 248),
+                Foreground = Color.FromArgb(27, 46, 75),
+                Accent = Color.FromArgb(0, 98, 204),
+                MenuBackground = Color.FromArgb(245, 248, 251),
+                MenuForeground = Color.FromArgb(27, 46, 75),
+                ButtonBackground = Color.FromArgb(0, 98, 204),
+                ButtonForeground = Color.White
+            },
+            [ColorScheme.Green] = new SchemeColors
+            {
+                Background = Color.FromArgb(236, 248, 242),
+                Foreground = Color.FromArgb(27, 75, 46),
+                Accent = Color.FromArgb(0, 204, 98),
+                MenuBackground = Color.FromArgb(245, 251, 248),
+                MenuForeground = Color.FromArgb(27, 75, 46),
+                ButtonBackground = Color.FromArgb(0, 204, 98),
+                ButtonForeground = Color.White
+            },
+            [ColorScheme.Custom] = new SchemeColors
+            {
+                Background = Color.FromArgb(248, 249, 250),
+                Foreground = Color.FromArgb(33, 37, 41),
+                Accent = Color.FromArgb(0, 123, 255),
+                MenuBackground = Color.FromArgb(255, 255, 255),
+                MenuForeground = Color.FromArgb(33, 37, 41),
+                ButtonBackground = Color.FromArgb(0, 123, 255),
+                ButtonForeground = Color.White
+            }
+        };
 
         // Constants and settings
         private const string RECENT_PROJECTS_FILE = "recent_projects.txt";
         private const int MAX_RECENT_PROJECTS = 10;
-        
+        private const string UNITY_PROCESS_NAME = "Unity";
+        private const string UNITY_HUB_PROCESS_NAME = "Unity Hub";
+        private const string UNITY_CRASH_HANDLER = "UnityCrashHandler";
+        private List<string> unityProcessNames = new() { UNITY_PROCESS_NAME, UNITY_HUB_PROCESS_NAME, UNITY_CRASH_HANDLER };
+
         // State
         private string projectPath = string.Empty;
         private readonly List<string> recentProjects = new();
-        private Action<int>? updateProgressUI;
         private CancellationTokenSource? cancellationTokenSource;
+        private bool isCleaningInProgress;
 
         // Safe directories to clean within Library
         private readonly string[] safeTempPaths = new[]
         {
             "Temp",
             "Library/ShaderCache",
+            "Library/TempArtifacts",
             "Library/BuildCache",
             "Library/ArtifactDB",
             "Library/SourceAssetDB",
-            "Library/TempArtifacts",
             "Library/APIUpdater",
-            "Library/PackageCache",
-            "Library/StateCache"
+            "Library/BurstCache",
+            "Library/PackageCache"
         };
 
-        // Directories that should never be deleted
+        // Protected paths that should not be deleted
         private readonly string[] protectedPaths = new[]
         {
+            "ProjectSettings",
             "Assets",
             "Packages",
-            "ProjectSettings",
             "Library/LastSceneManagerSetup.txt",
             "Library/EditorUserBuildSettings.asset",
-            "Library/EditorUserSettings.asset",
-            "Library/ProjectSettings.asset",
-            "Library/ScriptAssemblies"
+            "Library/BuildPlayer.prefs",
+            "Library/assetservercachev3",
+            "Library/unity default resources",
+            "Library/unity editor resources",
+            "Library/ScriptMapper"
         };
 
-        // Expected Unity project structure
+        // Common Unity project structure and validation
         private readonly string[] expectedFolders = new[]
         {
             "Assets",
@@ -86,7 +192,6 @@ namespace UnityCacheCleaner
             "Library"
         };
 
-        // Common Unity project structure
         private readonly string[] recommendedAssetFolders = new[]
         {
             "Assets/Animations",
@@ -100,7 +205,6 @@ namespace UnityCacheCleaner
             "Assets/UI"
         };
 
-        // Common Unity issues to check for
         private readonly (string Path, string Issue, string Recommendation)[] commonIssueChecks = new[]
         {
             ("Library/PackageCache", "Package cache might be corrupted", "Try deleting the PackageCache folder and let Unity rebuild it"),
@@ -111,486 +215,764 @@ namespace UnityCacheCleaner
             ("Packages/manifest.json", "Package dependency issues", "Verify package versions in manifest.json")
         };
 
-        private string GetCleaningSummary()
-        {
-            var summary = new StringBuilder();
-            summary.AppendLine("Cleaning Summary:");
-            summary.AppendLine("----------------");
-            
-            if (cleanLibraryCache.Checked)
-                summary.AppendLine("✓ Library Cache");
-            if (cleanTempCache.Checked)
-                summary.AppendLine("✓ Temp Cache");
-            if (cleanEditorCache.Checked)
-                summary.AppendLine("✓ Editor Cache");
-
-            summary.AppendLine();
-            summary.AppendLine($"Project: {projectPath}");
-            
-            return summary.ToString();
-        }
-
         public MainForm()
         {
-            InitializeUI();
+            SetupMenuStrip();
+            SetupMainLayout();
             LoadRecentProjects();
-            SetupEventHandlers();
-            updateProgressUI = UpdateProgress;
+
+            Debug.WriteLine("MainForm initialized");
         }
 
-        private void SetupEventHandlers()
+        private void SetupMenuStrip()
         {
-            cleanButton.Click += CleanButton_Click!;
-            browseButton.Click += (sender, e) => BrowseForProjectDirectory();
-            buildAndRunButton.Click += BuildAndRunButton_Click!;
-            cancelButton.Click += CancelButton_Click!;
-            projectDirComboBox.SelectedIndexChanged += ProjectDirComboBox_SelectedIndexChanged!;
-            cleanTempCache.CheckedChanged += CheckBox_CheckedChanged!;
-            cleanLibraryCache.CheckedChanged += CheckBox_CheckedChanged!;
-            cleanEditorCache.CheckedChanged += CheckBox_CheckedChanged!;
+            // Initialize MenuStrip
+            menuStrip = new MenuStrip();
+
+            // Initialize menu items
+            donateMenuItem = new ToolStripMenuItem();
+            paypalMenuItem = new ToolStripMenuItem();
+            cashappMenuItem = new ToolStripMenuItem();
+            venmoMenuItem = new ToolStripMenuItem();
+            helpMenuItem = new ToolStripMenuItem("Help");
+            versionMenuItem = new ToolStripMenuItem($"Version {Program.Version}");
+            schemeMenuItem = new ToolStripMenuItem("Color Scheme");
+
+            // Configure MenuStrip
+            menuStrip.Items.AddRange(new ToolStripItem[] { helpMenuItem, schemeMenuItem, donateMenuItem });
+            menuStrip.Dock = DockStyle.Bottom;
+            menuStrip.Name = "menuStrip";
+            menuStrip.Padding = new Padding(6);
+            menuStrip.BackColor = colorSchemes[currentScheme].MenuBackground;
+            menuStrip.ForeColor = colorSchemes[currentScheme].MenuForeground;
+            menuStrip.RenderMode = ToolStripRenderMode.Professional;
+
+            // Configure Help Menu
+            helpMenuItem.DropDownItems.Add(versionMenuItem);
+            helpMenuItem.ForeColor = colorSchemes[currentScheme].MenuForeground;
+
+            // Configure Color Scheme Menu
+            foreach (ColorScheme scheme in Enum.GetValues(typeof(ColorScheme)))
+            {
+                var schemeItem = new ToolStripMenuItem(scheme.ToString())
+                {
+                    Tag = scheme,
+                    Checked = scheme == currentScheme
+                };
+                schemeItem.Click += SchemeItem_Click;
+                schemeMenuItem.DropDownItems.Add(schemeItem);
+            }
+
+            // Add custom colors option
+            var customizeItem = new ToolStripMenuItem("Customize Colors...");
+            customizeItem.Click += CustomizeColors_Click;
+            schemeMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            schemeMenuItem.DropDownItems.Add(customizeItem);
+
+            Controls.Add(menuStrip);
+            MainMenuStrip = menuStrip;
+
+            ApplyColorScheme();
         }
 
-        private void InitializeUI()
+        private void SchemeItem_Click(object? sender, EventArgs e)
         {
-            // Initialize form properties
-            this.Text = "Unity Cache Cleaner";
-            this.Size = new Size(800, 600);
-            this.MinimumSize = new Size(600, 400);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.StartPosition = FormStartPosition.CenterScreen;
+            try
+            {
+                if (sender is not ToolStripMenuItem menuItem)
+                {
+                    Debug.WriteLine("SchemeItem_Click: sender is not a ToolStripMenuItem");
+                    return;
+                }
 
-            // Get Unity project path from command line or current directory
-            projectPath = Environment.GetCommandLineArgs().Length > 1 
-                ? Environment.GetCommandLineArgs()[1]
-                : Directory.GetCurrentDirectory();
+                if (menuItem.Tag is not ColorScheme scheme)
+                {
+                    Debug.WriteLine("SchemeItem_Click: Tag is not a ColorScheme");
+                    return;
+                }
 
-            // Create main menu
-            mainMenu = new MenuStrip();
-            var fileMenu = new ToolStripMenuItem("File");
-            var exitItem = new ToolStripMenuItem("Exit", null, (s, e) => Close());
-            fileMenu.DropDownItems.Add(exitItem);
+                Debug.WriteLine($"Changing color scheme to: {scheme}");
+                currentScheme = scheme;
 
-            var helpMenu = new ToolStripMenuItem("Help");
-            var aboutItem = new ToolStripMenuItem("About", null, AboutItem_Click);
-            var versionItem = new ToolStripMenuItem("Version", null, VersionItem_Click);
-            var documentationItem = new ToolStripMenuItem("Documentation", null, DocumentationItem_Click);
-            helpMenu.DropDownItems.AddRange(new[] { aboutItem, versionItem, documentationItem });
+                // Update checkmarks
+                foreach (ToolStripItem item in schemeMenuItem.DropDownItems)
+                {
+                    // Skip separators and items without tags
+                    if (item is not ToolStripMenuItem menuItemToUpdate || item.Tag is not ColorScheme)
+                    {
+                        continue;
+                    }
 
-            mainMenu.Items.AddRange(new[] { fileMenu, helpMenu });
-            this.MainMenuStrip = mainMenu;
-            this.Controls.Add(mainMenu);
+                    menuItemToUpdate.Checked = (ColorScheme)item.Tag == currentScheme;
+                }
 
-            // Initialize tab control
-            tabControl = new TabControl
+                ApplyColorScheme();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in SchemeItem_Click: {ex.Message}");
+                LogError($"Failed to change color scheme: {ex.Message}");
+            }
+        }
+
+        private void CustomizeColors_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                var colors = colorSchemes[ColorScheme.Custom];
+                var customizeForm = new Form
+                {
+                    Text = "Customize Colors",
+                    Size = new Size(400, 500),
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    StartPosition = FormStartPosition.CenterParent,
+                    MaximizeBox = false,
+                    MinimizeBox = false
+                };
+
+                var layout = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    Padding = new Padding(10),
+                    RowCount = 8,
+                    ColumnCount = 2
+                };
+
+                var colorButtons = new Dictionary<string, (Button button, Color initialColor, Action<Color> setter)>
+                {
+                    ["Background"] = (new Button(), colors.Background, c => colors.Background = c),
+                    ["Text Color"] = (new Button(), colors.Foreground, c => colors.Foreground = c),
+                    ["Accent"] = (new Button(), colors.Accent, c => colors.Accent = c),
+                    ["Menu Background"] = (new Button(), colors.MenuBackground, c => colors.MenuBackground = c),
+                    ["Menu Text"] = (new Button(), colors.MenuForeground, c => colors.MenuForeground = c),
+                    ["Button Background"] = (new Button(), colors.ButtonBackground, c => colors.ButtonBackground = c),
+                    ["Button Text"] = (new Button(), colors.ButtonForeground, c => colors.ButtonForeground = c)
+                };
+
+                int row = 0;
+                foreach (var item in colorButtons)
+                {
+                    var label = new Label
+                    {
+                        Text = item.Key,
+                        AutoSize = true,
+                        Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                        TextAlign = ContentAlignment.MiddleLeft
+                    };
+
+                    var button = item.Value.button;
+                    button.BackColor = item.Value.initialColor;
+                    button.FlatStyle = FlatStyle.Flat;
+                    button.Size = new Size(100, 30);
+                    button.Click += (s, e) =>
+                    {
+                        using var dialog = new ColorDialog
+                        {
+                            Color = button.BackColor,
+                            FullOpen = true
+                        };
+
+                        if (dialog.ShowDialog() == DialogResult.OK)
+                        {
+                            button.BackColor = dialog.Color;
+                            item.Value.setter(dialog.Color);
+                        }
+                    };
+
+                    layout.Controls.Add(label, 0, row);
+                    layout.Controls.Add(button, 1, row);
+                    row++;
+                }
+
+                var previewButton = new Button
+                {
+                    Text = "Preview",
+                    Dock = DockStyle.Bottom,
+                    Height = 30,
+                    Margin = new Padding(0, 10, 0, 0)
+                };
+                previewButton.Click += (s, e) =>
+                {
+                    currentScheme = ColorScheme.Custom;
+                    ApplyColorScheme();
+                };
+
+                var saveButton = new Button
+                {
+                    Text = "Save",
+                    Dock = DockStyle.Bottom,
+                    Height = 30,
+                    Margin = new Padding(0, 10, 0, 0)
+                };
+                saveButton.Click += (s, e) =>
+                {
+                    currentScheme = ColorScheme.Custom;
+                    ApplyColorScheme();
+                    customizeForm.Close();
+                };
+
+                customizeForm.Controls.Add(layout);
+                customizeForm.Controls.Add(previewButton);
+                customizeForm.Controls.Add(saveButton);
+
+                Debug.WriteLine("Opening color customization dialog");
+                customizeForm.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in CustomizeColors_Click: {ex.Message}");
+                LogError($"Failed to open color customization dialog: {ex.Message}");
+            }
+        }
+
+        private void ApplyColorScheme()
+        {
+            try
+            {
+                var colors = colorSchemes[currentScheme];
+
+                // Apply to form
+                BackColor = colors.Background;
+                ForeColor = colors.Foreground;
+
+                // Apply to menu
+                menuStrip.BackColor = colors.MenuBackground;
+                menuStrip.ForeColor = colors.MenuForeground;
+                foreach (ToolStripItem item in menuStrip.Items)
+                {
+                    item.ForeColor = colors.MenuForeground;
+                }
+
+                // Apply to controls
+                cleanButton.BackColor = colors.ButtonBackground;
+                cleanButton.ForeColor = colors.ButtonForeground;
+                browseButton.BackColor = colors.ButtonBackground;
+                browseButton.ForeColor = colors.ButtonForeground;
+                cancelButton.BackColor = colors.ButtonBackground;
+                cancelButton.ForeColor = colors.ButtonForeground;
+
+                // Apply to other controls
+                logTextBox.BackColor = colors.Background;
+                logTextBox.ForeColor = colors.Foreground;
+                projectPathComboBox.BackColor = colors.Background;
+                projectPathComboBox.ForeColor = colors.Foreground;
+
+                Debug.WriteLine($"Applied color scheme: {currentScheme}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error applying color scheme: {ex.Message}");
+                LogError("Failed to apply color scheme");
+            }
+        }
+
+        private void SetupMainLayout()
+        {
+            // Form properties
+            Text = $"Unity Cache Cleaner v{Program.Version}";
+            MinimumSize = new Size(600, 500);
+            StartPosition = FormStartPosition.CenterScreen;
+            BackColor = colorSchemes[currentScheme].Background;
+            ForeColor = colorSchemes[currentScheme].Foreground;
+
+            // Main layout
+            var mainLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                Location = new Point(10, 30),
-                Size = new Size(ClientSize.Width - 20, ClientSize.Height - 40)
+                Padding = new Padding(10),
+                RowCount = 5,
+                ColumnCount = 1,
+                BackColor = colorSchemes[currentScheme].Background
             };
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            // Initialize log tab
-            logTab = new TabPage("Log");
-            logTextBox = new RichTextBox
+            // Project selection panel
+            var projectPanel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ReadOnly = true,
-                BackColor = Color.White,
-                Font = new Font("Consolas", 9F),
-                Multiline = true,
-                ScrollBars = RichTextBoxScrollBars.Both
+                AutoSize = true,
+                ColumnCount = 3,
+                Margin = new Padding(0, 0, 0, 10)
             };
-            logTab.Controls.Add(logTextBox);
+            projectPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            projectPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            projectPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            // Initialize debug tab
-            debugTab = new TabPage("Debug Output");
-            debugOutputBox = new RichTextBox
-            {
-                Dock = DockStyle.Fill,
-                ReadOnly = true,
-                BackColor = Color.Black,
-                ForeColor = Color.Lime,
-                Font = new Font("Consolas", 9F),
-                Multiline = true,
-                ScrollBars = RichTextBoxScrollBars.Both
-            };
-            debugTab.Controls.Add(debugOutputBox);
-
-            // Add tabs to tab control
-            tabControl.TabPages.Add(logTab);
-            tabControl.TabPages.Add(debugTab);
-
-            // Initialize project controls
             var projectLabel = new Label
             {
-                Text = "Unity Project:",
-                Location = new Point(10, 40),
-                AutoSize = true
+                Text = "Project:",
+                AutoSize = true,
+                Margin = new Padding(0, 5, 5, 0),
+                ForeColor = colorSchemes[currentScheme].Foreground
             };
 
-            projectDirComboBox = new ComboBox
+            projectPathComboBox = new ComboBox
             {
-                Location = new Point(100, 37),
-                Width = ClientSize.Width - 200,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                Dock = DockStyle.Fill,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = colorSchemes[currentScheme].Background,
+                ForeColor = colorSchemes[currentScheme].Foreground,
+                FlatStyle = FlatStyle.Flat
             };
 
             browseButton = new Button
             {
-                Text = "Browse...",
-                Location = new Point(ClientSize.Width - 90, 35),
-                Width = 80,
+                Text = "Browse",
+                AutoSize = true,
+                Margin = new Padding(5, 0, 0, 0),
+                BackColor = colorSchemes[currentScheme].ButtonBackground,
+                ForeColor = colorSchemes[currentScheme].ButtonForeground,
+                FlatStyle = FlatStyle.Flat,
+                Padding = new Padding(10, 5, 10, 5)
+            };
+
+            projectPanel.Controls.Add(projectLabel, 0, 0);
+            projectPanel.Controls.Add(projectPathComboBox, 1, 0);
+            projectPanel.Controls.Add(browseButton, 2, 0);
+
+            // Options panel
+            var optionsGroup = new GroupBox
+            {
+                Text = "Cleaning Options",
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                ForeColor = colorSchemes[currentScheme].Foreground,
+                Padding = new Padding(10),
+                Height = 180
+            };
+
+            var optionsLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                AutoSize = true
+            };
+
+            cleanTempCache = CreateOptionCheckBox("Clean Temporary Files",
+                "cleanTempCache", true);
+            cleanLibraryCache = CreateOptionCheckBox("Clean Library Cache",
+                "cleanLibraryCache", true);
+            cleanEditorCache = CreateOptionCheckBox("Clean Editor Cache",
+                "cleanEditorCache", true);
+            signOutUnity = CreateOptionCheckBox("Sign Out of Unity",
+                "signOutUnity", false);
+
+            signOutUnity.CheckedChanged += SignOutUnity_CheckedChanged;
+
+            optionsLayout.Controls.Add(cleanTempCache);
+            optionsLayout.Controls.Add(cleanLibraryCache);
+            optionsLayout.Controls.Add(cleanEditorCache);
+            optionsLayout.Controls.Add(signOutUnity);
+
+            optionsGroup.Controls.Add(optionsLayout);
+
+            // Log panel
+            var logPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 10, 0, 10)
+            };
+
+            logTextBox = new RichTextBox
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                BackColor = colorSchemes[currentScheme].Background,
+                ForeColor = colorSchemes[currentScheme].Foreground,
+                Font = new Font("Consolas", 9F),
+                BorderStyle = BorderStyle.None
+            };
+
+            logPanel.Controls.Add(logTextBox);
+
+            // Bottom panel
+            var bottomPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                ColumnCount = 4,
+                Margin = new Padding(0)
+            };
+            bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); // Progress bar
+            bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); // Percent label
+            bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); // Clean button
+            bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); // Cancel button
+
+            progressBar = new ProgressBar
+            {
+                Width = 200,
                 Height = 23,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
+                Style = ProgressBarStyle.Continuous,
+                MarqueeAnimationSpeed = 30
             };
 
-            // Initialize checkboxes
-            cleanLibraryCache = new CheckBox
+            percentLabel = new Label
             {
-                Text = "Clean Library Cache",
-                Location = new Point(10, 70),
+                Text = "0%",
                 AutoSize = true,
-                Checked = true
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(5, 0, 10, 0),
+                ForeColor = colorSchemes[currentScheme].Foreground
             };
 
-            cleanTempCache = new CheckBox
-            {
-                Text = "Clean Temp Cache",
-                Location = new Point(150, 70),
-                AutoSize = true,
-                Checked = true
-            };
-
-            cleanEditorCache = new CheckBox
-            {
-                Text = "Clean Editor Cache",
-                Location = new Point(290, 70),
-                AutoSize = true,
-                Checked = true
-            };
-
-            // Initialize buttons
             cleanButton = new Button
             {
-                Text = "Clean Cache",
-                Location = new Point(10, 100),
-                Width = 150,
-                Height = 30
-            };
-
-            buildAndRunButton = new Button
-            {
-                Text = "Build && Run",
-                Location = new Point(170, 100),
-                Width = 150,
-                Height = 30
+                Text = "Clean",
+                AutoSize = true,
+                Margin = new Padding(0),
+                BackColor = colorSchemes[currentScheme].ButtonBackground,
+                ForeColor = colorSchemes[currentScheme].ButtonForeground,
+                FlatStyle = FlatStyle.Flat,
+                Padding = new Padding(20, 5, 20, 5)
             };
 
             cancelButton = new Button
             {
                 Text = "Cancel",
-                Location = new Point(330, 100),
-                Width = 100,
-                Height = 30
+                AutoSize = true,
+                Enabled = false,
+                Margin = new Padding(5, 0, 0, 0),
+                BackColor = colorSchemes[currentScheme].ButtonBackground,
+                ForeColor = colorSchemes[currentScheme].ButtonForeground,
+                FlatStyle = FlatStyle.Flat,
+                Padding = new Padding(10, 5, 10, 5)
             };
 
-            // Initialize progress controls
-            progressBar = new ProgressBar
-            {
-                Location = new Point(10, 140),
-                Width = ClientSize.Width - 90,
-                Height = 23,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
+            bottomPanel.Controls.Add(progressBar, 0, 0);
+            bottomPanel.Controls.Add(percentLabel, 1, 0);
+            bottomPanel.Controls.Add(cleanButton, 2, 0);
+            bottomPanel.Controls.Add(cancelButton, 3, 0);
 
-            percentLabel = new Label
-            {
-                Location = new Point(ClientSize.Width - 70, 145),
-                Width = 60,
-                Text = "0%",
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
+            // Add all panels to main layout
+            mainLayout.Controls.Add(projectPanel, 0, 0);
+            mainLayout.Controls.Add(optionsGroup, 0, 1);
+            mainLayout.Controls.Add(logPanel, 0, 2);
+            mainLayout.Controls.Add(bottomPanel, 0, 3);
 
-            statusLabel = new Label
-            {
-                Location = new Point(10, ClientSize.Height - 30),
-                Width = ClientSize.Width - 20,
-                Height = 20,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
-            };
+            Controls.Add(mainLayout);
 
-            // Add controls to form
-            this.Controls.AddRange(new Control[]
-            {
-                projectLabel,
-                projectDirComboBox,
-                browseButton,
-                cleanLibraryCache,
-                cleanTempCache,
-                cleanEditorCache,
-                cleanButton,
-                buildAndRunButton,
-                cancelButton,
-                progressBar,
-                percentLabel,
-                statusLabel,
-                tabControl
-            });
+            // Set up event handlers
+            SetupEventHandlers();
 
-            // Set initial status
-            statusLabel.Text = "Ready";
+            // Load recent projects
+            LoadRecentProjects();
+            PopulateRecentProjects();
+
+            // Initialize state
+            UpdateCleanButtonState();
         }
 
-        protected override void OnLoad(EventArgs e)
+        private void SetupEventHandlers()
         {
-            base.OnLoad(e);
-            UpdateDebugState();
+            cleanButton.Click += CleanButton_Click;
+            browseButton.Click += BrowseButton_Click;
+            cleanTempCache.CheckedChanged += CheckBox_CheckedChanged;
+            cleanLibraryCache.CheckedChanged += CheckBox_CheckedChanged;
+            cleanEditorCache.CheckedChanged += CheckBox_CheckedChanged;
+            signOutUnity.CheckedChanged += CheckBox_CheckedChanged;
+            projectPathComboBox.SelectedIndexChanged += ProjectPathComboBox_SelectedIndexChanged;
+            cancelButton.Click += CancelButton_Click;
         }
 
-        private void UpdateProgress(int value)
+        private async void BrowseButton_Click(object sender, EventArgs e)
         {
-            if (this.InvokeRequired)
+            if (isCleaningInProgress)
             {
-                this.Invoke(new Action<int>(UpdateProgress), value);
-                return;
-            }
-            progressBar.Value = Math.Min(100, Math.Max(0, value));
-            percentLabel.Text = string.Format("{0}%", progressBar.Value);
-        }
-
-        private async void CleanButton_Click(object sender, EventArgs e)
-        {
-            if (!IsValidUnityProject(projectPath))
-            {
-                MessageBox.Show("Please select a valid Unity project directory.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                LogError("Cannot browse while cleaning is in progress");
                 return;
             }
 
             try
             {
-                cleanButton.Enabled = false;
-                cancelButton.Enabled = true;
-                statusLabel.Text = "Cleaning...";
-                progressBar.Value = 0;
-                progressBar.Style = ProgressBarStyle.Continuous;
-
-                // Create new cancellation token source
-                cancellationTokenSource = new CancellationTokenSource();
-
-                // Log cleaning start
-                Debug.WriteLine($"Starting cache clean for project: {projectPath}");
-                LogMessage(GetCleaningSummary());
-
-                // Count total files to process
-                int totalFiles = await CountFilesToProcess();
-                if (totalFiles == 0)
+                browseButton.Enabled = false;
+                using (var folderDialog = new FolderBrowserDialog())
                 {
-                    LogMessage("No files to clean.");
-                    return;
-                }
+                    folderDialog.Description = "Select Unity Project Directory";
+                    folderDialog.UseDescriptionForTitle = true;
+                    folderDialog.ShowNewFolderButton = false;
 
-                Debug.WriteLine($"Total files to process: {totalFiles}");
-                int processedFiles = 0;
-
-                // Clean temp directory
-                if (cleanTempCache.Checked)
-                {
-                    Debug.WriteLine("Cleaning temp directory...");
-                    await CleanTempDirectory(progress =>
+                    if (folderDialog.ShowDialog() == DialogResult.OK)
                     {
-                        processedFiles += progress;
-                        UpdateProgress((int)((float)processedFiles / totalFiles * 100));
-                    }, cancellationTokenSource.Token);
-                }
+                        string selectedPath = folderDialog.SelectedPath;
+                        Debug.WriteLine($"Selected directory: {selectedPath}");
 
-                // Clean library cache
-                if (cleanLibraryCache.Checked)
-                {
-                    Debug.WriteLine("Cleaning library cache...");
-                    await CleanLibraryCache(progress =>
-                    {
-                        processedFiles += progress;
-                        UpdateProgress((int)((float)processedFiles / totalFiles * 100));
-                    }, cancellationTokenSource.Token);
-                }
+                        if (string.IsNullOrEmpty(selectedPath))
+                        {
+                            LogError("Selected path is empty");
+                            return;
+                        }
 
-                // Clean editor cache
-                if (cleanEditorCache.Checked)
-                {
-                    Debug.WriteLine("Cleaning editor cache...");
-                    await CleanEditorCache(progress =>
-                    {
-                        processedFiles += progress;
-                        UpdateProgress((int)((float)processedFiles / totalFiles * 100));
-                    }, cancellationTokenSource.Token);
-                }
+                        if (!Directory.Exists(selectedPath))
+                        {
+                            LogError("Selected directory does not exist");
+                            return;
+                        }
 
-                LogSuccess("Cache cleaning completed successfully!");
-            }
-            catch (OperationCanceledException)
-            {
-                LogMessage("Operation cancelled by user.");
-                Debug.WriteLine("Cache cleaning cancelled by user");
+                        try
+                        {
+                            await ValidateProjectAsync(selectedPath);
+                            projectPathComboBox.Text = selectedPath;
+                            PopulateRecentProjects();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error validating project: {ex.Message}");
+                            LogError($"Error validating project: {ex.Message}");
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
-                LogError($"Error cleaning cache: {ex.Message}");
-                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                Debug.WriteLine($"Error in browse button click: {ex.Message}");
+                LogError($"Error selecting directory: {ex.Message}");
             }
             finally
             {
-                cleanButton.Enabled = true;
-                cancelButton.Enabled = false;
-                statusLabel.Text = "Ready";
-                progressBar.Value = 0;
+                browseButton.Enabled = true;
+            }
+        }
+
+        private async Task ValidateProjectAsync(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                throw new ArgumentException("Project path cannot be empty");
+            }
+
+            if (!Directory.Exists(path))
+            {
+                throw new ArgumentException("Directory does not exist");
+            }
+
+            try
+            {
+                Debug.WriteLine($"Validating project path: {path}");
+
+                bool isValid = await Task.Run(() =>
+                {
+                    try
+                    {
+                        return IsValidUnityProjectDirectory(path);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error checking Unity project: {ex.Message}");
+                        return false;
+                    }
+                });
+
+                if (!isValid)
+                {
+                    throw new InvalidOperationException("Selected directory is not a valid Unity project");
+                }
+
+                projectPath = path;
+                await Task.Run(() => AddToRecentProjects(path));
+                LogSuccess($"Valid Unity project found at: {path}");
+                UpdateCleanButtonState();
+                await UpdateDebugStateAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error validating project: {ex.Message}");
+                throw; // Rethrow to be handled by caller
+            }
+        }
+
+        private bool IsValidUnityProjectDirectory(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+                {
+                    return false;
+                }
+
+                // Check for essential Unity project folders
+                bool hasAssetsFolder = Directory.Exists(Path.Combine(path, "Assets"));
+                bool hasProjectSettingsFolder = Directory.Exists(Path.Combine(path, "ProjectSettings"));
+                bool hasPackagesFolder = Directory.Exists(Path.Combine(path, "Packages"));
+
+                // Check for Unity project file
+                bool hasProjectFile = File.Exists(Path.Combine(path, "ProjectSettings", "ProjectVersion.txt"));
+
+                Debug.WriteLine($"Unity project validation - Assets: {hasAssetsFolder}, ProjectSettings: {hasProjectSettingsFolder}, " +
+                              $"Packages: {hasPackagesFolder}, ProjectFile: {hasProjectFile}");
+
+                return hasAssetsFolder && hasProjectSettingsFolder && hasPackagesFolder && hasProjectFile;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error validating Unity project directory: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async void CleanButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (!ValidateSelectedPath())
+                {
+                    return;
+                }
+
+                // Check for running Unity processes
+                var unityProcesses = Process.GetProcessesByName("Unity");
+                var unityHubProcesses = Process.GetProcessesByName("Unity Hub");
                 
-                // Dispose cancellation token source
-                if (cancellationTokenSource != null)
+                if (unityProcesses.Length > 0 || unityHubProcesses.Length > 0)
                 {
-                    cancellationTokenSource.Dispose();
-                    cancellationTokenSource = null;
-                }
-            }
-        }
-
-        private async Task<int> CountFilesToProcess()
-        {
-            return await Task.Run(() =>
-            {
-                int totalFiles = 0;
-
-                // First check if any directories exist to clean
-                bool hasDirectoriesToClean = false;
-
-                if (cleanTempCache.Checked)
-                {
-                    string tempPath = Path.Combine(projectPath, "Temp");
-                    if (Directory.Exists(tempPath))
-                    {
-                        hasDirectoriesToClean = true;
-                        totalFiles += CountFilesInDirectory(tempPath);
-                    }
-                }
-
-                if (cleanLibraryCache.Checked)
-                {
-                    foreach (string relativePath in safeTempPaths.Where(p => p.StartsWith("Library")))
-                    {
-                        string fullPath = Path.Combine(projectPath, relativePath);
-                        if (Directory.Exists(fullPath))
-                        {
-                            hasDirectoriesToClean = true;
-                            totalFiles += CountFilesInDirectory(fullPath);
-                        }
-                    }
-                }
-
-                if (cleanEditorCache.Checked)
-                {
-                    string editorPath = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "Unity", "Editor", "Cache"
+                    var message = "Unity or Unity Hub is currently running. These applications must be closed before cleaning the cache.\n\n" +
+                                "Would you like to close them automatically?";
+                    
+                    var result = MessageBox.Show(
+                        message,
+                        "Unity Processes Running",
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Warning
                     );
-                    if (Directory.Exists(editorPath))
+
+                    if (result == DialogResult.Cancel)
                     {
-                        hasDirectoriesToClean = true;
-                        totalFiles += CountFilesInDirectory(editorPath);
+                        Debug.WriteLine("Cache cleaning cancelled - user chose not to close Unity");
+                        return;
                     }
-                }
 
-                if (!hasDirectoriesToClean)
-                {
-                    LogMessage("All cache directories are already clean!");
-                    return 0;
-                }
-
-                return totalFiles;
-            });
-        }
-
-        private async Task CleanTempDirectory(Action<int> progress, CancellationToken cancellationToken)
-        {
-            var tempPath = Path.Combine(projectPath, "Temp");
-            if (Directory.Exists(tempPath))
-            {
-                await Task.Run(() =>
-                {
-                    foreach (var file in Directory.GetFiles(tempPath, "*", SearchOption.AllDirectories))
+                    if (result == DialogResult.Yes)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        try
+                        Debug.WriteLine("Attempting to close Unity processes");
+                        foreach (var process in unityProcesses.Concat(unityHubProcesses))
                         {
-                            File.Delete(file);
-                            progress(1);
-                            Debug.WriteLine($"Deleted temp file: {file}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"Failed to delete temp file {file}: {ex.Message}");
-                        }
-                    }
-                }, cancellationToken);
-            }
-        }
-
-        private async Task CleanLibraryCache(Action<int> progress, CancellationToken cancellationToken)
-        {
-            var libraryPath = Path.Combine(projectPath, "Library");
-            if (Directory.Exists(libraryPath))
-            {
-                await Task.Run(() =>
-                {
-                    foreach (var dir in safeTempPaths)
-                    {
-                        var path = Path.Combine(libraryPath, dir);
-                        if (Directory.Exists(path))
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
                             try
                             {
-                                Directory.Delete(path, true);
-                                progress(1);
-                                Debug.WriteLine($"Deleted library cache: {path}");
+                                process.CloseMainWindow();
+                                if (!process.WaitForExit(5000)) // Wait up to 5 seconds
+                                {
+                                    process.Kill(); // Force close if it doesn't respond
+                                }
+                                Debug.WriteLine($"Closed process: {process.ProcessName}");
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"Failed to delete library cache {path}: {ex.Message}");
+                                Debug.WriteLine($"Failed to close process {process.ProcessName}: {ex.Message}");
                             }
                         }
+
+                        // Double check if processes are closed
+                        unityProcesses = Process.GetProcessesByName("Unity");
+                        unityHubProcesses = Process.GetProcessesByName("Unity Hub");
+                        if (unityProcesses.Length > 0 || unityHubProcesses.Length > 0)
+                        {
+                            MessageBox.Show(
+                                "Unable to close all Unity processes. Please close them manually before proceeding.",
+                                "Warning",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning
+                            );
+                            return;
+                        }
                     }
-                }, cancellationToken);
+                }
+
+                // Confirm cleaning operation
+                var confirmResult = MessageBox.Show(
+                    "Are you sure you want to clean the Unity cache?\n\n" +
+                    "This will delete:\n" +
+                    "- Temporary files\n" +
+                    "- Library cache\n" +
+                    "- Editor cache\n\n" +
+                    "This operation cannot be undone.",
+                    "Confirm Cache Cleaning",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question
+                );
+
+                if (confirmResult != DialogResult.Yes)
+                {
+                    Debug.WriteLine("Cache cleaning cancelled by user");
+                    return;
+                }
+
+                StartCleaning();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in CleanButton_Click: {ex.Message}");
+                LogError($"Failed to start cleaning: {ex.Message}");
+                MessageBox.Show(
+                    $"An error occurred while preparing to clean: {ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
             }
         }
 
-        private async Task CleanEditorCache(Action<int> progress, CancellationToken cancellationToken)
+        private void SaveRecentProjects()
         {
-            var editorPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity", "Editor");
-            if (Directory.Exists(editorPath))
+            try
             {
-                await Task.Run(() =>
+                Debug.WriteLine("Saving recent projects");
+                var projects = projectPathComboBox.Items.Cast<string>().ToList();
+                File.WriteAllLines(RECENT_PROJECTS_FILE, projects);
+                Debug.WriteLine($"Saved {projects.Count} recent projects");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error saving recent projects: {ex.Message}");
+                LogError($"Failed to save recent projects: {ex.Message}");
+            }
+        }
+
+        private void LoadRecentProjects()
+        {
+            try
+            {
+                Debug.WriteLine("Loading recent projects");
+                if (File.Exists(RECENT_PROJECTS_FILE))
                 {
-                    foreach (var file in Directory.GetFiles(editorPath, "*", SearchOption.AllDirectories))
+                    var projects = File.ReadAllLines(RECENT_PROJECTS_FILE);
+                    projectPathComboBox.Items.Clear();
+                    foreach (var project in projects)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        try
+                        if (!string.IsNullOrEmpty(project) && Directory.Exists(project) && IsValidUnityProjectDirectory(project))
                         {
-                            File.Delete(file);
-                            progress(1);
-                            Debug.WriteLine($"Deleted editor cache file: {file}");
+                            Debug.WriteLine($"Loading recent project: {project}");
+                            if (!projectPathComboBox.Items.Contains(project))
+                            {
+                                projectPathComboBox.Items.Add(project);
+                            }
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            Debug.WriteLine($"Failed to delete editor cache file {file}: {ex.Message}");
+                            Debug.WriteLine($"Skipping invalid project: {project}");
                         }
                     }
-                }, cancellationToken);
+                    Debug.WriteLine($"Loaded {projectPathComboBox.Items.Count} recent projects");
+                }
+                else
+                {
+                    Debug.WriteLine("No recent projects file found");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error loading recent projects: {ex.Message}");
+                LogError($"Failed to load recent projects: {ex.Message}");
             }
         }
 
         private int CountFilesInDirectory(string path)
         {
             if (!Directory.Exists(path)) return 0;
-            
+
             try
             {
                 return Directory.GetFiles(path, "*", SearchOption.AllDirectories).Length;
@@ -602,330 +984,24 @@ namespace UnityCacheCleaner
             }
         }
 
-        private void CleanNetcodeCache()
+        private void UpdateProgress(int value, int total)
         {
-            LogMessage("Cleaning Netcode for GameObjects cache...");
-
-            // Kill Unity Burst Compiler process
-            KillProcess("Unity.Burst.Compiler");
-
-            // Clean package cache
-            string packageCachePath = Path.Combine(projectPath, "Library", "PackageCache");
-            if (Directory.Exists(packageCachePath))
+            if (this.InvokeRequired)
             {
-                LogMessage("Cleaning package cache...");
-                try
-                {
-                    Directory.Delete(packageCachePath, true);
-                    LogSuccess(string.Format("Package cache cleaned successfully"));
-                }
-                catch (Exception ex)
-                {
-                    LogError(string.Format("Error cleaning package cache: {0}", ex.Message));
-                }
-            }
-
-            // Clean Asset Store cache
-            string assetStorePath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "Unity", "Asset Store-5.x");
-            if (Directory.Exists(assetStorePath))
-            {
-                LogMessage("Cleaning Asset Store cache...");
-                try
-                {
-                    Directory.Delete(assetStorePath, true);
-                    LogSuccess(string.Format("Asset Store cache cleaned successfully"));
-                }
-                catch (Exception ex)
-                {
-                    LogError(string.Format("Error cleaning Asset Store cache: {0}", ex.Message));
-                }
-            }
-
-            // Clean Assembly-CSharp files
-            string[] assemblyPatterns = new[] {
-                "Assembly-CSharp*.csproj",
-                "Assembly-CSharp*.dll"
-            };
-
-            foreach (string pattern in assemblyPatterns)
-            {
-                string[] files = Directory.GetFiles(projectPath, pattern, SearchOption.TopDirectoryOnly);
-                foreach (string file in files)
-                {
-                    try
-                    {
-                        File.Delete(file);
-                        LogSuccess(string.Format("Deleted {0}", Path.GetFileName(file)));
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError(string.Format("Error deleting {0}: {1}", Path.GetFileName(file), ex.Message));
-                    }
-                }
-            }
-
-            LogMessage("Netcode cache cleanup completed");
-        }
-
-        private void RegenerateAssemblyDefinitions()
-        {
-            LogMessage("Attempting to regenerate assembly definitions...");
-            
-            // Clean assembly-related files
-            string[] asmdefFiles = Directory.GetFiles(projectPath, "*.asmdef", SearchOption.AllDirectories);
-            foreach (string asmdef in asmdefFiles)
-            {
-                try
-                {
-                    string backupPath = asmdef + ".backup";
-                    File.Copy(asmdef, backupPath, true);
-                    LogSuccess(string.Format("Backed up {0}", Path.GetFileName(asmdef)));
-                }
-                catch (Exception ex)
-                {
-                    LogError(string.Format("Error backing up {0}: {1}", Path.GetFileName(asmdef), ex.Message));
-                }
-            }
-
-            LogMessage("Assembly definition files backed up. Please regenerate them in Unity Editor.");
-        }
-
-        private void LogMessage(string message)
-        {
-            if (logTextBox.InvokeRequired || debugOutputBox.InvokeRequired)
-            {
-                this.Invoke(new Action(() => LogMessage(message)));
+                this.Invoke(new Action<int, int>(UpdateProgress), value, total);
                 return;
             }
-
-            string timestamp = DateTime.Now.ToString("HH:mm:ss");
-            string logEntry = string.Format("[{0}] {1}{2}", timestamp, message, Environment.NewLine);
-            
-            // Add to regular log
-            logTextBox.AppendText(logEntry);
-            logTextBox.ScrollToCaret();
-
-            // Add to debug output with more details
-            string debugEntry = string.Format("[{0}] [Thread:{1}] {2}", timestamp, System.Threading.Thread.CurrentThread.ManagedThreadId, message);
-            debugOutputBox.AppendText(debugEntry + Environment.NewLine);
-            
-            // Add stack trace for errors
-            if (message.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase))
-            {
-                string stackTrace = Environment.StackTrace;
-                debugOutputBox.AppendText(string.Format("Stack Trace:{0}{1}{0}", Environment.NewLine, stackTrace));
-            }
-            
-            debugOutputBox.ScrollToCaret();
-            
-            // Also write to debug output
-            Debug.WriteLine(message);
-            
-            // Update status label
-            if (statusLabel != null)
-            {
-                if (statusLabel.InvokeRequired)
-                {
-                    statusLabel.Invoke(new Action(() => statusLabel.Text = message));
-                }
-                else
-                {
-                    statusLabel.Text = message;
-                }
-            }
-        }
-
-        private void UpdateDebugState()
-        {
-            if (debugOutputBox.InvokeRequired)
-            {
-                this.Invoke(new Action(UpdateDebugState));
-                return;
-            }
-
-            StringBuilder debug = new StringBuilder();
-            debug.AppendLine("=== Unity Cache Cleaner Debug State ===");
-            debug.AppendLine(string.Format("Timestamp: {0:yyyy-MM-dd HH:mm:ss}", DateTime.Now));
-            debug.AppendLine(string.Format("Project Path: {0}", projectPath));
-            debug.AppendLine(string.Format("Unity Editor Running: {0}", Process.GetProcessesByName("Unity").Length > 0 || Process.GetProcessesByName("UnityEditor").Length > 0));
-            debug.AppendLine("\nSelected Options:");
-            debug.AppendLine(string.Format("- Clean Library Cache: {0}", cleanLibraryCache.Checked));
-            debug.AppendLine(string.Format("- Clean Temp Cache: {0}", cleanTempCache.Checked));
-            debug.AppendLine(string.Format("- Clean Editor Cache: {0}", cleanEditorCache.Checked));
-            debug.AppendLine("\nProtected Paths:");
-            foreach (var path in protectedPaths)
-            {
-                debug.AppendLine(string.Format("- {0}", path));
-            }
-            debug.AppendLine("\nSafe Cache Paths:");
-            foreach (var path in safeTempPaths)
-            {
-                debug.AppendLine(string.Format("- {0}", path));
-            }
-            debug.AppendLine("\nSystem Information:");
-            debug.AppendLine(string.Format("OS Version: {0}", Environment.OSVersion));
-            debug.AppendLine(string.Format("Machine Name: {0}", Environment.MachineName));
-            debug.AppendLine(string.Format("Processor Count: {0}", Environment.ProcessorCount));
-            debug.AppendLine(string.Format("Working Set: {0} MB", Environment.WorkingSet / 1024 / 1024));
-            debug.AppendLine(string.Format(".NET Runtime: {0}", Environment.Version));
-            debug.AppendLine("\n=== End Debug State ===");
-
-            debugOutputBox.Text = debug.ToString() + Environment.NewLine + debugOutputBox.Text;
-        }
-
-        private void KillProcess(string processName)
-        {
-            Process[] processes = Process.GetProcessesByName(processName);
-            foreach (Process process in processes)
-            {
-                process.Kill();
-            }
-        }
-
-        private void LogError(string message)
-        {
-            Debug.WriteLine($"ERROR: {message}");
-            MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            
-            if (logTextBox.InvokeRequired)
-            {
-                logTextBox.Invoke(new Action(() => LogError(message)));
-                return;
-            }
-
-            string timestamp = DateTime.Now.ToString("HH:mm:ss");
-            string logEntry = $"[{timestamp}] ERROR: {message}{Environment.NewLine}";
-            logTextBox.AppendText(logEntry);
-            logTextBox.ScrollToCaret();
-        }
-
-        private void LogSuccess(string message)
-        {
-            Debug.WriteLine($"SUCCESS: {message}");
-            
-            if (logTextBox.InvokeRequired)
-            {
-                logTextBox.Invoke(new Action(() => LogSuccess(message)));
-                return;
-            }
-
-            string timestamp = DateTime.Now.ToString("HH:mm:ss");
-            string logEntry = $"[{timestamp}] SUCCESS: {message}{Environment.NewLine}";
-            logTextBox.AppendText(logEntry);
-            logTextBox.ScrollToCaret();
-        }
-
-        private void Log(string message)
-        {
-            Debug.WriteLine(message);
-            
-            if (logTextBox.InvokeRequired)
-            {
-                logTextBox.Invoke(new Action(() => Log(message)));
-                return;
-            }
-
-            string timestamp = DateTime.Now.ToString("HH:mm:ss");
-            string logEntry = $"[{timestamp}] {message}{Environment.NewLine}";
-            logTextBox.AppendText(logEntry);
-            logTextBox.ScrollToCaret();
-        }
-
-        private void BrowseForProjectDirectory()
-        {
-            using (var dialog = new FolderBrowserDialog())
-            {
-                dialog.Description = "Select Unity Project Directory";
-                dialog.ShowNewFolderButton = false;
-                
-                if (Directory.Exists(projectPath))
-                {
-                    dialog.SelectedPath = projectPath;
-                }
-
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    projectPath = dialog.SelectedPath;
-                    projectDirComboBox.Text = projectPath;
-                    AddToRecentProjects(projectPath);
-                    LogMessage(string.Format("Selected project directory: {0}", projectPath));
-                    Debug.WriteLine(string.Format("Selected project directory: {0}", projectPath));
-                }
-            }
-        }
-
-        private void LoadRecentProjects()
-        {
-            try
-            {
-                if (File.Exists(RECENT_PROJECTS_FILE))
-                {
-                    var lines = File.ReadAllLines(RECENT_PROJECTS_FILE);
-                    foreach (var line in lines)
-                    {
-                        if (!string.IsNullOrWhiteSpace(line) && Directory.Exists(line))
-                        {
-                            recentProjects.Add(line);
-                            Debug.WriteLine($"Loaded recent project: {line}");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error loading recent projects: {ex.Message}");
-            }
-        }
-
-        private void AddToRecentProjects(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-                return;
 
             try
             {
-                // Remove existing entry if present
-                recentProjects.Remove(path);
-
-                // Add to beginning of list
-                recentProjects.Insert(0, path);
-
-                // Trim list to max size
-                while (recentProjects.Count > MAX_RECENT_PROJECTS)
-                {
-                    recentProjects.RemoveAt(recentProjects.Count - 1);
-                }
-
-                // Save to file
-                File.WriteAllLines(RECENT_PROJECTS_FILE, recentProjects);
-                Debug.WriteLine($"Added {path} to recent projects");
+                progressBar.Value = Math.Min(100, Math.Max(0, (int)((float)value / total * 100)));
+                percentLabel.Text = $"{progressBar.Value}%";
+                Debug.WriteLine($"Progress updated: {progressBar.Value}%");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error adding to recent projects: {ex.Message}");
+                Debug.WriteLine($"Error updating progress: {ex.Message}");
             }
-        }
-
-        private bool IsValidUnityProject(string? path)
-        {
-            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
-            {
-                return false;
-            }
-
-            // Check for required Unity project folders
-            string[] requiredFolders = { "Assets", "ProjectSettings", "Packages" };
-            foreach (string folder in requiredFolders)
-            {
-                if (!Directory.Exists(Path.Combine(path, folder)))
-                {
-                    return false;
-                }
-            }
-
-            return true;
         }
 
         private void PopulateRecentProjects()
@@ -933,37 +1009,33 @@ namespace UnityCacheCleaner
             try
             {
                 // Clear existing items
-                projectDirComboBox.Items.Clear();
+                projectPathComboBox.Items.Clear();
 
                 // Add recent projects
                 foreach (var project in recentProjects)
                 {
                     if (Directory.Exists(project))
                     {
-                        projectDirComboBox.Items.Add(project);
+                        projectPathComboBox.Items.Add(project);
                         Debug.WriteLine($"Added recent project to combo box: {project}");
                     }
                 }
 
                 // Search for additional Unity projects
-                var registryProjects = GetProjectsFromRegistry();
-                foreach (var project in registryProjects)
+                var unityDirs = FindUnityDirectories();
+                
+                foreach (var dir in unityDirs)
                 {
-                    if (!recentProjects.Contains(project) && Directory.Exists(project))
+                    if (!recentProjects.Contains(dir) && Directory.Exists(dir))
                     {
-                        projectDirComboBox.Items.Add(project);
-                        Debug.WriteLine($"Added registry project to combo box: {project}");
+                        projectPathComboBox.Items.Add(dir);
+                        Debug.WriteLine($"Added Unity directory to combo box: {dir}");
                     }
                 }
 
-                var commonProjects = SearchCommonProjectDirectories();
-                foreach (var project in commonProjects)
+                if (projectPathComboBox.Items.Count > 0)
                 {
-                    if (!recentProjects.Contains(project) && !registryProjects.Contains(project) && Directory.Exists(project))
-                    {
-                        projectDirComboBox.Items.Add(project);
-                        Debug.WriteLine($"Added common project to combo box: {project}");
-                    }
+                    projectPathComboBox.SelectedIndex = 0;
                 }
             }
             catch (Exception ex)
@@ -972,71 +1044,61 @@ namespace UnityCacheCleaner
             }
         }
 
-        private List<string> GetProjectsFromRegistry()
+        private List<string> FindUnityDirectories()
         {
-            var projects = new List<string>();
+            var unityDirs = new List<string>();
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Unity Technologies\Unity Editor 5.x");
-                if (key != null)
+                // Common Unity project locations
+                var searchPaths = new[]
                 {
-                    var recentProjects = key.GetValue("RecentlyUsedProjectPaths") as string[];
-                    if (recentProjects != null)
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Unity Projects"),
+                    @"C:\Unity Projects",
+                    @"D:\Unity Projects"
+                };
+
+                foreach (var searchPath in searchPaths)
+                {
+                    if (!Directory.Exists(searchPath))
                     {
-                        foreach (var project in recentProjects)
-                        {
-                            if (!string.IsNullOrEmpty(project) && Directory.Exists(project))
-                            {
-                                projects.Add(project);
-                                Debug.WriteLine($"Found Unity project in registry: {project}");
-                            }
-                        }
+                        continue;
+                    }
+
+                    try
+                    {
+                        var dirs = Directory.GetDirectories(searchPath, "*", SearchOption.AllDirectories)
+                            .Where(dir => Directory.Exists(Path.Combine(dir, "Library")) ||
+                                        Directory.Exists(Path.Combine(dir, "ProjectSettings")))
+                            .ToList();
+
+                        unityDirs.AddRange(dirs);
+                        Debug.WriteLine($"Found {dirs.Count} Unity directories in {searchPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error searching in {searchPath}: {ex.Message}");
                     }
                 }
+
+                // Load recent projects
+                if (File.Exists(RECENT_PROJECTS_FILE))
+                {
+                    var recentProjects = File.ReadAllLines(RECENT_PROJECTS_FILE)
+                        .Where(dir => Directory.Exists(dir))
+                        .ToList();
+                    unityDirs.AddRange(recentProjects);
+                    Debug.WriteLine($"Loaded {recentProjects.Count} recent projects");
+                }
+
+                return unityDirs.Distinct().ToList();
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"ERROR: Failed to search registry: {ex.Message}");
-                MessageBox.Show($"Failed to search registry: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Debug.WriteLine($"Error in FindUnityDirectories: {ex.Message}");
+                LogError("Failed to find Unity directories");
+                return unityDirs;
             }
-            return projects;
-        }
-
-        private List<string> SearchCommonProjectDirectories()
-        {
-            var projects = new List<string>();
-            var commonPaths = new[]
-            {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Unity Projects"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Projects"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "Unity Projects"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "source", "repos")
-            };
-
-            foreach (var basePath in commonPaths)
-            {
-                try
-                {
-                    if (Directory.Exists(basePath))
-                    {
-                        var directories = Directory.GetDirectories(basePath, "*", SearchOption.AllDirectories);
-                        foreach (var dir in directories)
-                        {
-                            if (IsValidUnityProject(dir))
-                            {
-                                projects.Add(dir);
-                                Debug.WriteLine($"Found Unity project in common directory: {dir}");
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"ERROR: Failed to search directory {basePath}: {ex.Message}");
-                    MessageBox.Show($"Failed to search directory {basePath}: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }
-            return projects;
         }
 
         private DateTime? GetLastAccessTime(string path)
@@ -1060,7 +1122,7 @@ namespace UnityCacheCleaner
         private string ValidateProjectStructure()
         {
             StringBuilder issues = new StringBuilder();
-            
+
             // Check for required folders
             foreach (string folder in expectedFolders)
             {
@@ -1137,7 +1199,7 @@ namespace UnityCacheCleaner
 
                 string[] lines = File.ReadAllLines(versionPath);
                 string projectVersion = lines.FirstOrDefault(l => l.StartsWith("m_EditorVersion:"))?.Split(':')[1].Trim();
-                
+
                 // Check if project version matches any installed Unity version
                 string unityHubPath = @"C:\Program Files\Unity Hub\Unity Hub.exe";
                 if (File.Exists(unityHubPath) && !string.IsNullOrEmpty(projectVersion))
@@ -1164,7 +1226,7 @@ namespace UnityCacheCleaner
             {
                 var rootFiles = Directory.GetFiles(assetsPath, "*.*", SearchOption.TopDirectoryOnly)
                     .Where(f => !f.EndsWith(".meta"));
-                
+
                 if (rootFiles.Any())
                 {
                     recommendations.AppendLine("⚠️ Found files in Assets root folder. Consider organizing them into appropriate subfolders.");
@@ -1205,53 +1267,117 @@ namespace UnityCacheCleaner
             return recommendations.ToString();
         }
 
-        private void DonateButton_Click(object sender, EventArgs e)
-        {
-            OpenDonationLink();
-        }
-
-        private void DonateLink_Click(object sender, EventArgs e)
-        {
-            OpenDonationLink();
-        }
-
-        private void OpenDonationLink()
+        private void OpenPayPalDonation(object? sender, EventArgs e)
         {
             try
             {
-                Process.Start(new ProcessStartInfo
+                Debug.WriteLine("Opening PayPal donation link (@scottjedelman)");
+                LogMessage("Opening PayPal donation link...");
+
+                var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName = "https://www.paypal.com/paypalme/scottvectradesigns",
+                    FileName = "https://paypal.me/scottjedelman",
                     UseShellExecute = true
-                });
+                };
+                using var process = System.Diagnostics.Process.Start(psi);
+                Debug.WriteLine("Successfully opened PayPal donation link");
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                Debug.WriteLine($"Win32 error opening PayPal donation link: {ex.Message}");
+                LogError($"Failed to open PayPal donation link: {ex.Message}");
+                MessageBox.Show($"Error opening PayPal donation link: {ex.Message}\nPlease send to: @scottjedelman",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Debug.WriteLine($"Invalid operation opening PayPal donation link: {ex.Message}");
+                LogError($"Failed to open PayPal donation link: {ex.Message}");
+                MessageBox.Show($"Error opening PayPal donation link: {ex.Message}\nPlease send to: @scottjedelman",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Could not open PayPal link. Please send donations manually to scott@vectradesigns.com\n\nError: {ex.Message}", 
-                    "Donation Link Error", 
-                    MessageBoxButtons.OK, 
-                    MessageBoxIcon.Information);
+                Debug.WriteLine($"Error opening PayPal donation link: {ex.Message}");
+                LogError($"Failed to open PayPal donation link: {ex.Message}");
+                MessageBox.Show("Error opening PayPal donation link. Please send to: @scottjedelman",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        private string? GetVersionFromFile(string filePath)
+        private void OpenCashAppDonation(object? sender, EventArgs e)
         {
             try
             {
-                if (File.Exists(filePath))
+                Debug.WriteLine("Opening CashApp donation link ($SeroVectrA)");
+                LogMessage("Opening CashApp donation link...");
+
+                var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    string[] lines = File.ReadAllLines(filePath);
-                    if (lines.Length > 0)
-                    {
-                        return lines[0].Trim();
-                    }
-                }
-                return null;
+                    FileName = "https://cash.app/$SeroVectrA",
+                    UseShellExecute = true
+                };
+                using var process = System.Diagnostics.Process.Start(psi);
+                Debug.WriteLine("Successfully opened CashApp donation link");
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                Debug.WriteLine($"Win32 error opening CashApp donation link: {ex.Message}");
+                LogError($"Failed to open CashApp donation link: {ex.Message}");
+                MessageBox.Show($"Error opening CashApp donation link: {ex.Message}\nPlease send to: $SeroVectrA",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Debug.WriteLine($"Invalid operation opening CashApp donation link: {ex.Message}");
+                LogError($"Failed to open CashApp donation link: {ex.Message}");
+                MessageBox.Show($"Error opening CashApp donation link: {ex.Message}\nPlease send to: $SeroVectrA",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"ERROR: Failed to read version from file: {ex.Message}");
-                return null;
+                Debug.WriteLine($"Error opening CashApp donation link: {ex.Message}");
+                LogError($"Failed to open CashApp donation link: {ex.Message}");
+                MessageBox.Show("Error opening CashApp donation link. Please send to: $SeroVectrA",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void OpenVenmoDonation(object? sender, EventArgs e)
+        {
+            try
+            {
+                Debug.WriteLine("Opening Venmo donation link (@SeroVectrA)");
+                LogMessage("Opening Venmo donation link...");
+
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "https://venmo.com/SeroVectrA",
+                    UseShellExecute = true
+                };
+                using var process = System.Diagnostics.Process.Start(psi);
+                Debug.WriteLine("Successfully opened Venmo donation link");
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                Debug.WriteLine($"Win32 error opening Venmo donation link: {ex.Message}");
+                LogError($"Failed to open Venmo donation link: {ex.Message}");
+                MessageBox.Show($"Error opening Venmo donation link: {ex.Message}\nPlease send to: @SeroVectrA",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Debug.WriteLine($"Invalid operation opening Venmo donation link: {ex.Message}");
+                LogError($"Failed to open Venmo donation link: {ex.Message}");
+                MessageBox.Show($"Error opening Venmo donation link: {ex.Message}\nPlease send to: @SeroVectrA",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error opening Venmo donation link: {ex.Message}");
+                LogError($"Failed to open Venmo donation link: {ex.Message}");
+                MessageBox.Show("Error opening Venmo donation link. Please send to: @SeroVectrA",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -1291,62 +1417,675 @@ namespace UnityCacheCleaner
             });
         }
 
-        private async void BuildAndRunButton_Click(object? sender, EventArgs e)
+        private void ProjectPathComboBox_SelectedIndexChanged(object? sender, EventArgs e)
         {
-            if (string.IsNullOrEmpty(projectPath) || !IsValidUnityProject(projectPath))
-            {
-                MessageBox.Show("Please select a valid Unity project directory.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            try
-            {
-                buildAndRunButton.Enabled = false;
-                statusLabel.Text = "Building and running...";
-                Debug.WriteLine($"Starting build and run for project: {projectPath}");
-
-                var buildManager = new BuildManager(projectPath);
-                await buildManager.BuildAndRun();
-
-                LogSuccess("Build and run completed successfully!");
-            }
-            catch (Exception ex)
-            {
-                LogError($"Error during build and run: {ex.Message}");
-                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-            }
-            finally
-            {
-                buildAndRunButton.Enabled = true;
-                statusLabel.Text = "Ready";
-            }
-        }
-
-        private void ProjectDirComboBox_SelectedIndexChanged(object? sender, EventArgs e)
-        {
-            var selectedPath = projectDirComboBox.SelectedItem?.ToString();
+            string selectedPath = projectPathComboBox.SelectedItem?.ToString() ?? string.Empty;
             if (!string.IsNullOrEmpty(selectedPath))
             {
-                projectPath = selectedPath;
-                UpdateDebugState();
-                Debug.WriteLine($"Selected project path: {projectPath}");
+                _ = ValidateProjectAsync(selectedPath); // Fire and forget async call
             }
         }
 
-        private void CheckBox_CheckedChanged(object? sender, EventArgs e)
+        private void CheckBox_CheckedChanged(object sender, EventArgs e)
         {
-            UpdateDebugState();
-            if (sender is CheckBox checkBox)
-            {
-                Debug.WriteLine($"Checkbox {checkBox.Name} changed to {checkBox.Checked}");
-            }
+            UpdateCleanButtonState();
+            _ = UpdateDebugStateAsync(); // Fire and forget async call
         }
 
         private void CancelButton_Click(object? sender, EventArgs e)
         {
-            Debug.WriteLine("Cancel button clicked");
-            cancellationTokenSource?.Cancel();
-            LogMessage("Operation cancelled by user");
+            if (isCleaningInProgress && cancellationTokenSource != null)
+            {
+                Debug.WriteLine("Cancelling cleaning operation...");
+                cancellationTokenSource.Cancel();
+                LogMessage("Cancelling operation...");
+            }
+        }
+
+        private void LogMessage(string message)
+        {
+            try
+            {
+                if (logTextBox.InvokeRequired)
+                {
+                    this.Invoke(new Action(() => LogMessage(message)));
+                    return;
+                }
+
+                string timestamp = DateTime.Now.ToString("HH:mm:ss");
+                string logEntry = $"[{timestamp}] {message}{Environment.NewLine}";
+
+                logTextBox.AppendText(logEntry);
+                logTextBox.ScrollToCaret();
+                Debug.WriteLine(message);
+
+                if (statusLabel != null)
+                {
+                    statusLabel.Text = message;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error logging message: {ex.Message}");
+            }
+        }
+
+        private void LogError(string message)
+        {
+            Debug.WriteLine($"ERROR: {message}");
+
+            if (logTextBox.InvokeRequired)
+            {
+                logTextBox.Invoke(new Action(() => LogError(message)));
+                return;
+            }
+
+            string timestamp = DateTime.Now.ToString("HH:mm:ss");
+            string logEntry = $"[{timestamp}] ERROR: {message}{Environment.NewLine}";
+            logTextBox.AppendText(logEntry);
+            logTextBox.ScrollToCaret();
+
+            MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private void LogSuccess(string message)
+        {
+            Debug.WriteLine($"SUCCESS: {message}");
+
+            if (logTextBox.InvokeRequired)
+            {
+                logTextBox.Invoke(new Action(() => LogSuccess(message)));
+                return;
+            }
+
+            string timestamp = DateTime.Now.ToString("HH:mm:ss");
+            string logEntry = $"[{timestamp}] SUCCESS: {message}{Environment.NewLine}";
+            logTextBox.AppendText(logEntry);
+            logTextBox.ScrollToCaret();
+        }
+
+        private void AddToRecentProjects(string path)
+        {
+            try
+            {
+                Debug.WriteLine($"Adding to recent projects: {path}");
+
+                if (!projectPathComboBox.Items.Contains(path))
+                {
+                    projectPathComboBox.Items.Add(path);
+                    SaveRecentProjects();
+                    Debug.WriteLine("Project added to recent list");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error adding to recent projects: {ex.Message}");
+                LogError($"Failed to add project to recent list: {ex.Message}");
+            }
+        }
+
+        private async Task CloseUnityProcesses()
+        {
+            try
+            {
+                Debug.WriteLine("Attempting to close Unity processes...");
+                await Task.Run(() =>
+                {
+                    foreach (var processName in unityProcessNames)
+                    {
+                        try
+                        {
+                            var processes = Process.GetProcessesByName(processName);
+                            foreach (var process in processes)
+                            {
+                                Debug.WriteLine($"Attempting to close {processName} process...");
+                                process.Kill();
+                                process.WaitForExit(5000); // Wait up to 5 seconds
+                                Debug.WriteLine($"Successfully closed {processName} process");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error closing {processName} process: {ex.Message}");
+                        }
+                    }
+                });
+                Debug.WriteLine("Finished closing Unity processes");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in CloseUnityProcesses: {ex.Message}");
+                throw;
+            }
+        }
+
+        private async Task<int> CountFilesToProcess()
+        {
+            return await Task.Run(() =>
+            {
+                int count = 0;
+
+                try
+                {
+                    if (cleanTempCache.Checked)
+                    {
+                        string tempPath = Path.Combine(projectPath, "Temp");
+                        if (Directory.Exists(tempPath))
+                        {
+                            count += Directory.GetFiles(tempPath, "*.*", SearchOption.AllDirectories)
+                                .Count(file => !protectedPaths.Contains(file));
+                        }
+                    }
+
+                    if (cleanLibraryCache.Checked)
+                    {
+                        string libraryPath = Path.Combine(projectPath, "Library");
+                        if (Directory.Exists(libraryPath))
+                        {
+                            count += Directory.GetFiles(libraryPath, "*.*", SearchOption.AllDirectories)
+                                .Count(file => !protectedPaths.Contains(file));
+                        }
+                    }
+
+                    if (cleanEditorCache.Checked)
+                    {
+                        string editorPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Unity", "Editor");
+                        if (Directory.Exists(editorPath))
+                        {
+                            count += Directory.GetFiles(editorPath, "*.*", SearchOption.AllDirectories)
+                                .Count(file => !protectedPaths.Contains(file));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error counting files: {ex.Message}");
+                }
+
+                return count;
+            });
+        }
+
+        private async Task StartCleaningAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                isCleaningInProgress = true;
+                UpdateCleanButtonState();
+                await UpdateDebugStateAsync();
+
+                cancellationTokenSource = new CancellationTokenSource();
+                var token = cancellationTokenSource.Token;
+
+                await CloseUnityProcesses();
+
+                var totalFiles = await CountFilesToProcess();
+                if (totalFiles == 0 && !signOutUnity.Checked)
+                {
+                    LogMessage("No files to clean.");
+                    return;
+                }
+
+                var processedFiles = 0;
+                var progress = new Progress<int>(value =>
+                {
+                    processedFiles = value;
+                    UpdateProgress(processedFiles, totalFiles);
+                });
+
+                if (cleanTempCache.Checked)
+                {
+                    await CleanTempDirectory(value => ((IProgress<int>)progress).Report(value), token);
+                }
+
+                if (cleanLibraryCache.Checked)
+                {
+                    await CleanLibraryCache(value => ((IProgress<int>)progress).Report(value), token);
+                }
+
+                if (cleanEditorCache.Checked)
+                {
+                    await CleanEditorCache(value => ((IProgress<int>)progress).Report(value), token);
+                }
+
+                if (signOutUnity.Checked)
+                {
+                    await SignOutFromUnity();
+                }
+
+                LogSuccess("All operations completed successfully!");
+
+                // Show completion dialog with exit option
+                var result = MessageBox.Show(
+                    "All operations completed successfully! Would you like to exit the application?",
+                    "Operations Complete",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    Application.Exit();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                LogMessage("Operation cancelled by user.");
+            }
+            catch (Exception ex)
+            {
+                LogError($"Error during operations: {ex.Message}");
+            }
+            finally
+            {
+                isCleaningInProgress = false;
+                UpdateCleanButtonState();
+                await UpdateDebugStateAsync();
+                cancellationTokenSource?.Dispose();
+                cancellationTokenSource = null;
+            }
+        }
+
+        private void StartCleaning()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(projectPath))
+                {
+                    LogError("Please select a Unity project directory first.");
+                    return;
+                }
+
+                if (!cleanTempCache.Checked && !cleanLibraryCache.Checked && !cleanEditorCache.Checked && !signOutUnity.Checked)
+                {
+                    LogError("Please select at least one cache type to clean.");
+                    return;
+                }
+
+                StartCleaningAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in StartCleaning: {ex.Message}");
+                LogError($"Error starting cleaning process: {ex.Message}");
+            }
+        }
+
+        private async Task CleanTempDirectory(Action<int> progress, CancellationToken cancellationToken)
+        {
+            try
+            {
+                string tempPath = Path.Combine(projectPath, "Temp");
+                if (!Directory.Exists(tempPath))
+                {
+                    LogMessage("Temp directory not found. Skipping...");
+                    return;
+                }
+
+                await Task.Run(() =>
+                {
+                    var files = Directory.GetFiles(tempPath, "*.*", SearchOption.AllDirectories)
+                        .Where(file => !protectedPaths.Contains(file));
+
+                    int count = 0;
+                    foreach (var file in files)
+                    {
+                        if (cancellationToken.IsCancellationRequested) break;
+
+                        try
+                        {
+                            File.Delete(file);
+                            count++;
+                            progress(count);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error deleting temp file {file}: {ex.Message}");
+                        }
+                    }
+                }, cancellationToken);
+
+                LogSuccess("Temp directory cleaned successfully");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error cleaning temp directory: {ex.Message}");
+                LogError($"Error cleaning temp directory: {ex.Message}");
+            }
+        }
+
+        private async Task CleanLibraryCache(Action<int> progress, CancellationToken cancellationToken)
+        {
+            try
+            {
+                string libraryPath = Path.Combine(projectPath, "Library");
+                if (!Directory.Exists(libraryPath))
+                {
+                    LogMessage("Library directory not found. Skipping...");
+                    return;
+                }
+
+                await Task.Run(() =>
+                {
+                    var files = Directory.GetFiles(libraryPath, "*.*", SearchOption.AllDirectories)
+                        .Where(file => !protectedPaths.Contains(file));
+
+                    int count = 0;
+                    foreach (var file in files)
+                    {
+                        if (cancellationToken.IsCancellationRequested) break;
+
+                        try
+                        {
+                            File.Delete(file);
+                            count++;
+                            progress(count);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error deleting library file {file}: {ex.Message}");
+                        }
+                    }
+                }, cancellationToken);
+
+                LogSuccess("Library cache cleaned successfully");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error cleaning library cache: {ex.Message}");
+                LogError($"Error cleaning library cache: {ex.Message}");
+            }
+        }
+
+        private async Task CleanEditorCache(Action<int> progress, CancellationToken cancellationToken)
+        {
+            try
+            {
+                string editorPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Unity", "Editor");
+                if (!Directory.Exists(editorPath))
+                {
+                    LogMessage("Editor cache directory not found. Skipping...");
+                    return;
+                }
+
+                await Task.Run(() =>
+                {
+                    var files = Directory.GetFiles(editorPath, "*.*", SearchOption.AllDirectories)
+                        .Where(file => !protectedPaths.Contains(file));
+
+                    int count = 0;
+                    foreach (var file in files)
+                    {
+                        if (cancellationToken.IsCancellationRequested) break;
+
+                        try
+                        {
+                            File.Delete(file);
+                            count++;
+                            progress(count);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error deleting editor cache file {file}: {ex.Message}");
+                        }
+                    }
+                }, cancellationToken);
+
+                LogSuccess("Editor cache cleaned successfully");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error cleaning editor cache: {ex.Message}");
+                LogError($"Error cleaning editor cache: {ex.Message}");
+            }
+        }
+
+        private async Task SignOutFromUnity()
+        {
+            try
+            {
+                Debug.WriteLine("Starting Unity sign-out process");
+                LogMessage("Signing out of Unity...");
+
+                // Unity credential locations
+                var locations = new[]
+                {
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Unity"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Unity"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "UnityHub"),
+                };
+
+                foreach (var location in locations)
+                {
+                    if (Directory.Exists(location))
+                    {
+                        try
+                        {
+                            // Clear Unity credentials
+                            var credentialFiles = Directory.GetFiles(location, "*", SearchOption.AllDirectories)
+                                .Where(f => f.Contains("Unity.sso", StringComparison.OrdinalIgnoreCase) ||
+                                          f.Contains("accessToken", StringComparison.OrdinalIgnoreCase) ||
+                                          f.Contains("refreshToken", StringComparison.OrdinalIgnoreCase) ||
+                                          f.Contains("credentials", StringComparison.OrdinalIgnoreCase));
+
+                            foreach (var file in credentialFiles)
+                            {
+                                File.Delete(file);
+                                Debug.WriteLine($"Deleted credential file: {file}");
+                            }
+
+                            LogMessage($"Cleared Unity credentials from {location}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error clearing credentials from {location}: {ex.Message}");
+                            LogError($"Failed to clear some Unity credentials: {ex.Message}");
+                        }
+                    }
+                }
+
+                LogSuccess("Unity sign-out completed");
+                MessageBox.Show(
+                    "You have been signed out of Unity.\n\n" +
+                    "Next time you open Unity or Unity Hub:\n" +
+                    "1. You will need to sign in with your Unity ID\n" +
+                    "2. Reactivate your Unity license\n" +
+                    "3. Reconfigure Unity Hub settings\n\n" +
+                    "Make sure you have your credentials ready.",
+                    "Unity Sign-Out Complete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information
+                );
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error during Unity sign-out: {ex.Message}");
+                LogError($"Failed to complete Unity sign-out: {ex.Message}");
+            }
+        }
+
+        private void ShowVersionInfo()
+        {
+            try
+            {
+                string message = $"Unity Cache Cleaner\n" +
+                               $"Version: {Program.Version}\n" +
+                               $"Build Date: {Program.BuildDate}\n\n" +
+                               $" 2025 Serovectra";
+
+                Debug.WriteLine($"Showing version info: {Program.Version}");
+                MessageBox.Show(message, "Version Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error showing version info: {ex.Message}");
+                LogError("Failed to display version information");
+            }
+        }
+
+        private CheckBox CreateOptionCheckBox(string text, string name, bool defaultChecked = true)
+        {
+            var checkBox = new CheckBox
+            {
+                Text = text,
+                Name = name,
+                Checked = defaultChecked,
+                AutoSize = true,
+                ForeColor = colorSchemes[currentScheme].Foreground,
+                BackColor = colorSchemes[currentScheme].Background
+            };
+            checkBox.CheckedChanged += CheckBox_CheckedChanged;
+            Debug.WriteLine($"Created checkbox: {name}, Default checked: {defaultChecked}");
+            return checkBox;
+        }
+
+        private void UpdateCleanButtonState()
+        {
+            try
+            {
+                if (this.InvokeRequired)
+                {
+                    this.Invoke(new Action(UpdateCleanButtonState));
+                    return;
+                }
+
+                bool hasValidPath = !string.IsNullOrEmpty(projectPath) && IsValidUnityProjectDirectory(projectPath);
+                bool hasOptionSelected = cleanTempCache.Checked || cleanLibraryCache.Checked || cleanEditorCache.Checked || signOutUnity.Checked;
+                cleanButton.Enabled = hasValidPath && hasOptionSelected && !isCleaningInProgress;
+                cancelButton.Enabled = isCleaningInProgress;
+                Debug.WriteLine($"Clean button state updated - Enabled: {cleanButton.Enabled}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error updating clean button state: {ex.Message}");
+            }
+        }
+
+        private async Task UpdateDebugStateAsync()
+        {
+            try
+            {
+                if (logTextBox.InvokeRequired)
+                {
+                    await Task.Run(() => this.Invoke(new Action(async () => await UpdateDebugStateAsync())));
+                    return;
+                }
+
+                StringBuilder debug = new StringBuilder();
+                debug.AppendLine("=== Unity Cache Cleaner Debug State ===");
+                debug.AppendLine($"Timestamp: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                debug.AppendLine($"Project Path: {projectPath}");
+
+                bool unityRunning = await Task.Run(() =>
+                    Process.GetProcessesByName("Unity").Length > 0 ||
+                    Process.GetProcessesByName("UnityEditor").Length > 0);
+                debug.AppendLine($"Unity Editor Running: {unityRunning}");
+
+                debug.AppendLine("\nSelected Options:");
+                debug.AppendLine($"- Clean Library Cache: {cleanLibraryCache.Checked}");
+                debug.AppendLine($"- Clean Temp Cache: {cleanTempCache.Checked}");
+                debug.AppendLine($"- Clean Editor Cache: {cleanEditorCache.Checked}");
+                debug.AppendLine($"- Sign Out of Unity: {signOutUnity.Checked}");
+
+                debug.AppendLine("\nProtected Paths:");
+                foreach (var path in protectedPaths)
+                {
+                    debug.AppendLine($"- {path}");
+                }
+
+                debug.AppendLine("\nSafe Cache Paths:");
+                foreach (var path in safeTempPaths)
+                {
+                    debug.AppendLine($"- {path}");
+                }
+
+                debug.AppendLine("\nSystem Information:");
+                await Task.Run(() =>
+                {
+                    debug.AppendLine($"OS Version: {Environment.OSVersion}");
+                    debug.AppendLine($"Machine Name: {Environment.MachineName}");
+                    debug.AppendLine($"Processor Count: {Environment.ProcessorCount}");
+                    debug.AppendLine($"Working Set: {Environment.WorkingSet / 1024 / 1024} MB");
+                    debug.AppendLine($".NET Runtime: {Environment.Version}");
+                });
+                debug.AppendLine("\n=== End Debug State ===");
+
+                logTextBox.Text = debug.ToString() + Environment.NewLine + logTextBox.Text;
+                Debug.WriteLine("Debug state updated successfully");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error updating debug state: {ex.Message}");
+                LogError("Failed to update debug state");
+            }
+        }
+
+        private string GetCleaningSummary()
+        {
+            var summary = new StringBuilder();
+            summary.AppendLine("Cleaning Summary:");
+            summary.AppendLine("----------------");
+
+            if (cleanTempCache.Checked)
+                summary.AppendLine("✓ Temporary Files");
+            if (cleanLibraryCache.Checked)
+                summary.AppendLine("✓ Library Cache");
+            if (cleanEditorCache.Checked)
+                summary.AppendLine("✓ Editor Cache");
+            if (signOutUnity.Checked)
+                summary.AppendLine("✓ Sign Out of Unity");
+
+            return summary.ToString();
+        }
+
+        private bool ValidateSelectedPath()
+        {
+            if (string.IsNullOrEmpty(projectPath))
+            {
+                LogError("Please select a Unity project directory first.");
+                return false;
+            }
+
+            if (!Directory.Exists(projectPath))
+            {
+                LogError("Selected directory does not exist.");
+                return false;
+            }
+
+            if (!IsValidUnityProjectDirectory(projectPath))
+            {
+                LogError("Selected directory is not a valid Unity project.");
+                return false;
+            }
+
+            return true;
+        }
+
+        private void SignOutUnity_CheckedChanged(object sender, EventArgs e)
+        {
+            if (signOutUnity.Checked)
+            {
+                var result = MessageBox.Show(
+                    "Warning: Signing out of Unity will:\n\n" +
+                    "1. Remove all Unity credentials\n" +
+                    "2. Require you to sign in again with your Unity ID\n" +
+                    "3. Need to reactivate Unity license\n" +
+                    "4. Reset Unity Hub preferences\n\n" +
+                    "Make sure you have your Unity ID and password ready before proceeding.\n\n" +
+                    "Do you want to proceed with Unity sign-out?",
+                    "Unity Sign-Out Warning",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+
+                if (result == DialogResult.No)
+                {
+                    signOutUnity.Checked = false;
+                }
+                else
+                {
+                    Debug.WriteLine("User confirmed Unity sign-out option");
+                }
+            }
         }
     }
 }

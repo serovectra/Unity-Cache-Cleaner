@@ -215,6 +215,10 @@ namespace UnityCacheCleaner
             ("Packages/manifest.json", "Package dependency issues", "Verify package versions in manifest.json")
         };
 
+        private const string APPLICATION_NAME = "Unity Cache Cleaner";
+        private const string VERSION = "1.3.0-beta";
+        private const string COPYRIGHT = " 2025 Unity Cache Cleaner";
+
         public MainForm()
         {
             SetupMenuStrip();
@@ -235,7 +239,7 @@ namespace UnityCacheCleaner
             cashappMenuItem = new ToolStripMenuItem();
             venmoMenuItem = new ToolStripMenuItem();
             helpMenuItem = new ToolStripMenuItem("Help");
-            versionMenuItem = new ToolStripMenuItem($"Version {Program.Version}");
+            versionMenuItem = new ToolStripMenuItem($"Version {VERSION}");
             schemeMenuItem = new ToolStripMenuItem("Color Scheme");
 
             // Configure MenuStrip
@@ -469,7 +473,7 @@ namespace UnityCacheCleaner
         private void SetupMainLayout()
         {
             // Form properties
-            Text = $"Unity Cache Cleaner v{Program.Version}";
+            Text = $"{APPLICATION_NAME} v{VERSION}";
             MinimumSize = new Size(600, 500);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = colorSchemes[currentScheme].Background;
@@ -1384,7 +1388,7 @@ namespace UnityCacheCleaner
         private void AboutItem_Click(object? sender, EventArgs e)
         {
             MessageBox.Show(
-                "Unity Cache Cleaner\n\n" +
+                $"{APPLICATION_NAME}\n\n" +
                 "A tool to help clean Unity project caches and improve build times.\n\n" +
                 "Created by Scott Vectra\n" +
                 " 2024 Vectra Designs",
@@ -1398,7 +1402,7 @@ namespace UnityCacheCleaner
         {
             string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "Unknown";
             MessageBox.Show(
-                $"Unity Cache Cleaner v{version}\n\n" +
+                $"{APPLICATION_NAME} v{version}\n\n" +
                 "Build Information:\n" +
                 $"- .NET Runtime: {Environment.Version}\n" +
                 $"- OS: {Environment.OSVersion}",
@@ -1924,12 +1928,11 @@ namespace UnityCacheCleaner
         {
             try
             {
-                string message = $"Unity Cache Cleaner\n" +
-                               $"Version: {Program.Version}\n" +
-                               $"Build Date: {Program.BuildDate}\n\n" +
+                string message = $"{APPLICATION_NAME} v{VERSION}\n" +
+                               $"Build Date: {DateTime.Now}\n\n" +
                                $" 2025 Serovectra";
 
-                Debug.WriteLine($"Showing version info: {Program.Version}");
+                Debug.WriteLine($"Showing version info: {VERSION}");
                 MessageBox.Show(message, "Version Information", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)

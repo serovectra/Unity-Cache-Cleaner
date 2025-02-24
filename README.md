@@ -1,29 +1,44 @@
-# Unity Cache Cleaner
+# Unity Cache Cleaner v1.3.0-beta
 
-A Windows desktop application to help Unity developers manage and clean their project caches efficiently.
+A modern tool for managing Unity project caches and credentials. Helps improve build times and manage Unity sign-in state.
+
+## New in 1.3.0-beta
+
+- Modern bottom-aligned menu with theme support
+- Unity sign-out functionality with safety checks
+- Enhanced Unity process detection and handling
+- Improved Unity directory auto-detection
+- Real-time progress tracking
+- Detailed operation logging
+- Color scheme customization
+- Splash screen and modern UI
 
 ## Features
 
-- Clean Unity project temporary files
-- Clean Unity Library cache
-- Clean Unity Editor cache
-- Build and run Unity projects
-- Recent projects list with auto-discovery
-- Progress tracking and cancellation support
-- Detailed logging
-
-## Version 1.2.6 (2025-02-24)
-- Fixed menu positioning to prevent overlap with project dropdown
-- Updated version display consistency across the application
-- Added exit prompt after cleaning completion
-- Improved UI spacing and visual consistency
-- Added debug logging for better troubleshooting
+- Clean Unity project caches:
+  - Temporary cache
+  - Library cache
+  - Editor cache
+- Manage Unity credentials:
+  - Safe sign-out with warnings
+  - Credential state management
+- Modern UI:
+  - Theme support with color schemes
+  - Real-time progress tracking
+  - Detailed logging
+  - Process management
+- Safety features:
+  - Unity process detection
+  - Operation confirmations
+  - Detailed warnings
+  - Safe exit handling
 
 ## Requirements
 
-- Windows operating system
-- .NET 6.0 Runtime
-- Unity (any recent version)
+- Windows 10/11
+- .NET 6.0 or later
+- Unity 2019.4 or later (for cache cleaning)
+- Unity Hub 3.0 or later (for sign-out feature)
 
 ## Installation
 
@@ -33,25 +48,15 @@ A Windows desktop application to help Unity developers manage and clean their pr
 
 ## Usage
 
-1. Select a Unity project directory using one of these methods:
-   - Choose from the dropdown list of recently used projects
-   - Click "Browse" to select a project folder
-   - The app will automatically discover Unity projects in common locations
+1. Select your Unity project folder
+2. Choose which caches to clean
+3. Optionally select Unity sign-out
+4. Click "Clean" to start
+5. Follow the prompts and warnings
 
-2. Select which caches to clean:
-   - Temp Directory: Temporary files created during Unity Editor sessions
-   - Library Cache: Cached data in the Library folder
-   - Editor Cache: Unity Editor's global cache
+## Beta Notes
 
-3. Click "Clean" to start the cleaning process
-   - Progress will be shown in real-time
-   - You can cancel the operation at any time
-   - Results and any errors will be logged in the application
-
-4. Use "Build & Run" to compile and launch your Unity project
-   - Requires a valid build.ps1 script in your project root
-   - Build progress and errors will be displayed
-   - The application will automatically launch after successful build
+This is a beta release with significant new features. Please report any issues or feedback on GitHub.
 
 ## Development
 
@@ -97,3 +102,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Unity Technologies for their amazing game engine
 - The .NET community for Windows Forms
 - All contributors who help improve this tool
+- Unity Technologies
+- The Unity development community
+- All contributors and testers
